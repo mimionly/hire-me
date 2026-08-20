@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { neon } from '@neondatabase/serverless'
+import { createDb } from './index'
+import { seedDatabase } from './seed'
 
 const dbUrl = process.env.DATABASE_URL
 if (!dbUrl) {
@@ -10,8 +12,8 @@ if (!dbUrl) {
   process.exit(1)
 }
 
-async function runLocalMigration() {
-  console.log('🛠️  Migrating Neon database...')
+async function run() {
+  console.log('🔗 Connecting to Neon remote PostgreSQL...')
   const sql = neon(dbUrl!)
 
   console.log('📂 Reading migrations SQL...')
@@ -37,11 +39,15 @@ async function runLocalMigration() {
     }
   }
 
-  console.log('✅ Local migration complete!')
-  process.exit(0)
+  console.log('✅ Remote migration applied successfully!')
+
+  console.log('🌱 Seeding database...')
+  const db = createDb(dbUrl!)
+  await seedDatabase(db)
+  console.log('✅ Seeding complete!')
 }
 
-runLocalMigration().catch((err) => {
-  console.error('Migration failed:', err)
+run().catch((err) => {
+  console.error('❌ Migration and seeding failed:', err)
   process.exit(1)
 })

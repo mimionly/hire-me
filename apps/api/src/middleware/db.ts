@@ -1,7 +1,7 @@
 import { createMiddleware } from 'hono/factory'
-import { createDb } from '@repo/db'
 import type { Database } from '@repo/db'
 import { env } from 'hono/adapter'
+import { getDbClient } from '../db.js'
 
 /**
  * Variables injected into Hono context by this middleware.
@@ -20,7 +20,7 @@ export const dbMiddleware = createMiddleware<{
   Variables: DbVariables
 }>(async (c, next) => {
   const bindings = env(c)
-  const db = createDb(bindings.DATABASE_URL)
+  const db = await getDbClient(bindings)
   c.set('db', db)
   await next()
 })

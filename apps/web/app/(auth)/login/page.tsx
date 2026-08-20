@@ -82,7 +82,7 @@ export default function LoginPage() {
     }
   }
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
     if (!email.trim()) {
       setErrorMsg('Please enter your email address')
@@ -92,13 +92,56 @@ export default function LoginPage() {
 
     setIsLoading(true)
     sound.playPop(480)
+    setErrorMsg('')
 
-    setTimeout(() => {
-      setIsLoading(false)
+    interface AuthErrorResponse {
+      message?: string
+    }
+
+    interface AuthSuccessResponse {
+      user: {
+        id: string
+        email: string
+        role?: string
+      }
+    }
+
+    try {
+      const response = await fetch('http://localhost:8787/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          fullName: name.trim() || undefined,
+          isSignUp: isSignUp,
+        }),
+      })
+
+      if (!response.ok) {
+        const errData = (await response.json().catch(() => ({}))) as AuthErrorResponse
+        throw new Error(errData.message || 'Authentication failed')
+      }
+
+      const data = (await response.json()) as AuthSuccessResponse
+      localStorage.setItem('user_id', data.user.id)
+      localStorage.setItem('user_email', data.user.email)
+      if (data.user.role) {
+        localStorage.setItem('user_role', data.user.role)
+      }
+
       setState((s) => ({ ...s, isSuccess: true }))
       sound.playSuccess()
       triggerConfetti()
-    }, 1100)
+    } catch (err: unknown) {
+      const error = err as Error
+      console.error(error)
+      setErrorMsg(
+        error.message || 'Failed to authenticate. Please check your credentials or register.',
+      )
+      sound.playError()
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleGoogleLogin = () => {
@@ -107,6 +150,10 @@ export default function LoginPage() {
 
     setTimeout(() => {
       setIsLoading(false)
+      // Set a mock user ID for google login path
+      localStorage.setItem('user_id', '00000000-0001-0000-0000-000000000001')
+      localStorage.setItem('user_email', 'googleuser@example.com')
+      localStorage.setItem('user_role', 'student')
       setState((s) => ({ ...s, isSuccess: true }))
       sound.playSuccess()
       triggerConfetti()
