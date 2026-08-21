@@ -33,7 +33,7 @@ describe('Student Profile API', () => {
       id: testStudentId,
       email: 'teststudent@example.com',
       fullName: 'Test Student',
-      roles: '{student}' as any,
+      roles: ['student'],
     })
 
     // Insert a test recruiter user
@@ -41,7 +41,7 @@ describe('Student Profile API', () => {
       id: testRecruiterId,
       email: 'testrecruiter@example.com',
       fullName: 'Test Recruiter',
-      roles: '{recruiter}' as any,
+      roles: ['recruiter'],
     })
   }, 60000)
 

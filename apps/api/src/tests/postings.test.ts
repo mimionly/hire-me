@@ -1,7 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { app } from '../app.js'
 
-process.env.DATABASE_URL = 'postgresql://fake:fake@fake.tld/fake'
+const DATABASE_URL = 'postgresql://user:pass@db.test/hireme'
+
+process.env.DATABASE_URL = DATABASE_URL
 
 /** Parse a Response body as JSON with a loose type for easy test assertions. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -60,7 +62,7 @@ function makePosting(overrides: Record<string, unknown> = {}): any {
 
 /** Makes a request to the app with a fake DATABASE_URL so the db middleware doesn't throw before the mocked service runs. */
 function request(path: string) {
-  return app.request(path, {}, { DATABASE_URL: 'postgresql://fake:fake@fake.tld/fake' })
+  return app.request(path, {}, { DATABASE_URL })
 }
 
 // ==========================================
@@ -69,7 +71,6 @@ function request(path: string) {
 
 describe('GET /api/postings', () => {
   beforeEach(() => {
-    vi.mocked(listActivePostings).mockClear()
     vi.mocked(listActivePostings).mockResolvedValue({ rows: [], total: 0 })
   })
 
@@ -249,7 +250,6 @@ describe('GET /api/postings/:id', () => {
   const validId = '123e4567-e89b-12d3-a456-426614174000'
 
   beforeEach(() => {
-    vi.mocked(getPostingById).mockClear()
     vi.mocked(getPostingById).mockResolvedValue(null)
   })
 

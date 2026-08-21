@@ -1,24 +1,36 @@
 import { Hono } from 'hono'
-import { logger } from 'hono/logger'
 import { cors } from 'hono/cors'
+import { env } from 'hono/adapter'
+import { logger } from 'hono/logger'
 import { eq } from 'drizzle-orm'
 import { users } from '@repo/db'
 import { getDbClient } from './db.js'
 import { dbMiddleware } from './middleware/db.js'
 import { postingsRouter } from './routes/postings.js'
 import { studentRouter } from './routes/student.js'
+import { usersRouter } from './routes/users.js'
 
-const app = new Hono<{ Bindings: { DATABASE_URL: string } }>()
+const app = new Hono<{
+  Bindings: { DATABASE_URL: string; NEON_AUTH_BASE_URL: string; WEB_ORIGIN: string }
+}>()
 
 app.use('*', logger())
+
+/**
+ * The web app authenticates with a bearer token rather than a cookie, so no
+ * credentialed requests are allowed. Registered before `dbMiddleware` so a
+ * preflight never opens a database connection.
+ */
 app.use(
   '*',
   cors({
-    origin: '*',
-    allowHeaders: ['Content-Type', 'Authorization', 'x-user-id'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    origin: (_origin, c) => env<{ WEB_ORIGIN?: string }>(c).WEB_ORIGIN ?? 'http://localhost:3000',
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['authorization', 'content-type', 'x-user-id'],
+    maxAge: 86400,
   }),
 )
+
 app.use('*', dbMiddleware)
 
 app.get('/health', (c) => c.json({ status: 'ok' }))
@@ -67,17 +79,12 @@ app.post('/api/auth/login', async (c) => {
 
       let newUser
       try {
-        const dbUrl =
-          c.env?.DATABASE_URL ||
-          (typeof process !== 'undefined' ? process.env.DATABASE_URL : undefined)
-        const isNeon = !!(dbUrl && !dbUrl.includes('fake'))
         const inserted = await db
           .insert(users)
           .values({
             email: normalizedEmail,
             fullName: fullName.trim(),
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            roles: (isNeon ? ['student'] : '{student}') as any,
+            roles: ['student'],
           })
           .returning()
         newUser = inserted[0]
@@ -129,6 +136,9 @@ app.post('/api/auth/login', async (c) => {
 // Student job discovery
 app.route('/api/postings', postingsRouter)
 app.route('/api/student', studentRouter)
+
+// Authenticated user record and role selection
+app.route('/api/users', usersRouter)
 
 export { app }
 export type AppType = typeof app
