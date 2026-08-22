@@ -14,14 +14,6 @@ export const studentRouter = new Hono<{ Bindings: AppEnv }>()
 
 studentRouter.use('*', requireStudentAuth())
 
-// Single source of truth for the DK24 verification status enum.
-// Keep the type union and the runtime validator in sync — they had
-// drifted before (type said 'approved', validator said 'verified').
-// The test suite (PUT /profile test) confirms 'verified' is the
-// correct value, so that's the one kept here.
-const DK24_STATUSES = ['none', 'pending', 'verified', 'rejected'] as const
-type Dk24Status = (typeof DK24_STATUSES)[number]
-
 interface UpdateProfilePayload {
   fullName?: string
   bio?: string | null
@@ -42,7 +34,6 @@ interface UpdateProfilePayload {
   gpa?: string | null
   specialization?: string | null
   portfolioUrl?: string | null
-  dk24Status?: Dk24Status
 }
 
 export function calculateCompletionPercentage(profile: {
@@ -268,15 +259,6 @@ studentRouter.put('/profile', async (c) => {
   if (body.openToWork !== undefined && typeof body.openToWork !== 'boolean') {
     return c.json({ error: 'Validation Error', message: 'openToWork must be a boolean.' }, 400)
   }
-  if (body.dk24Status !== undefined && !DK24_STATUSES.includes(body.dk24Status)) {
-    return c.json(
-      {
-        error: 'Validation Error',
-        message: `dk24Status must be one of: ${DK24_STATUSES.join(', ')}.`,
-      },
-      400,
-    )
-  }
   if (
     body.resumeUrl !== undefined &&
     body.resumeUrl !== null &&
@@ -450,7 +432,6 @@ studentRouter.put('/profile', async (c) => {
       if (body.resumeUrl !== undefined) profileUpdates.resumeUrl = body.resumeUrl
       if (body.githubUrl !== undefined) profileUpdates.githubUrl = body.githubUrl
       if (body.linkedinUrl !== undefined) profileUpdates.linkedinUrl = body.linkedinUrl
-      if (body.dk24Status !== undefined) profileUpdates.dk24Status = body.dk24Status
       profileUpdates.otherLinks = mergedOtherLinks
 
       profileUpdates.updatedAt = new Date()

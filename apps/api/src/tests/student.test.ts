@@ -118,7 +118,6 @@ describe('Student Profile API', () => {
         gpa: '3.9',
         specialization: 'AI/ML',
         portfolioUrl: 'https://teststudent.dev',
-        dk24Status: 'verified',
       }),
     })
 
@@ -142,7 +141,7 @@ describe('Student Profile API', () => {
     expect(data.gpa).toBe('3.9')
     expect(data.specialization).toBe('AI/ML')
     expect(data.portfolioUrl).toBe('https://teststudent.dev')
-    expect(data.dk24Status).toBe('verified')
+    expect(data.dk24Status).toBe('none')
 
     // Direct database assertions to ensure values are persisted in student_profiles
     const db = await getDbClient()
