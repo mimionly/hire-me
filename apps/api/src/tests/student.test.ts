@@ -65,8 +65,8 @@ import dotenv from 'dotenv'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // Load environment variables for the test suite
-dotenv.config({ path: path.resolve(__dirname, '../../.env.local') })
-dotenv.config({ path: path.resolve(__dirname, '../../.dev.vars') })
+dotenv.config({ path: path.resolve(__dirname, '../../.env.local'), override: true })
+dotenv.config({ path: path.resolve(__dirname, '../../.dev.vars'), override: true })
 
 describe('Student Profile API', () => {
   const testStudentId = '00000000-1111-2222-3333-444444444444'
