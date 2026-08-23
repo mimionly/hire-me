@@ -51,14 +51,7 @@ export default function RoleSelectPage() {
     setErrorMsg('')
 
     try {
-      const data = await apiFetch<{ user: { id: string } }>('/api/users/me/role', {
-        method: 'PATCH',
-        body: { role },
-      })
-      if (data?.user?.id) {
-        localStorage.setItem('user_id', data.user.id)
-      }
-      localStorage.setItem('user_role', role)
+      await apiFetch('/api/users/me/role', { method: 'PATCH', body: { role } })
     } catch (error) {
       // An expired session cannot be recovered here — send them back to sign in.
       if (error instanceof ApiError && error.status === 401) {
