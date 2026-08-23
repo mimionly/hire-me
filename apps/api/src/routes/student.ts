@@ -8,7 +8,7 @@ import {
   skills as skillsTable,
   experience as experienceTable,
 } from '@repo/db'
-import { requireStudentAuth } from '../middleware/auth'
+import { requireStudentAuth } from '../middleware/auth.js'
 
 export const studentRouter = new Hono<{ Bindings: AppEnv }>()
 

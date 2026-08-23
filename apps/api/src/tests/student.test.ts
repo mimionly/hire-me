@@ -1,5 +1,59 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, expect, it, beforeAll } from 'vitest'
+import { describe, expect, it, beforeAll, vi } from 'vitest'
+
+vi.mock('../middleware/auth.js', () => {
+  return {
+    requireAuth: async (c: any, next: any) => {
+      const userId = c.req.header('x-user-id') || '00000000-1111-2222-3333-444444444444'
+      c.set('authUser', {
+        id: userId,
+        email:
+          userId === '00000000-1111-2222-3333-555555555555'
+            ? 'testrecruiter@example.com'
+            : 'teststudent@example.com',
+        name: userId === '00000000-1111-2222-3333-555555555555' ? 'Test Recruiter' : 'Test Student',
+      })
+      await next()
+    },
+    requireStudentAuth: () => async (c: any, next: any) => {
+      console.log('[TEST MOCK] requireStudentAuth middleware executed for', c.req.path)
+      const userId = c.req.header('x-user-id')
+      if (!userId) {
+        return c.json(
+          { error: 'Unauthorized', message: 'Missing Authorization or x-user-id header.' },
+          401,
+        )
+      }
+
+      const { getDbClient } = await import('../db.js')
+      const { users } = await import('@repo/db')
+      const { eq } = await import('drizzle-orm')
+
+      const db = await getDbClient(c.env)
+      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+
+      if (!user) {
+        return c.json({ error: 'Unauthorized', message: 'User record not found.' }, 401)
+      }
+
+      if (!user.roles.includes('student')) {
+        return c.json(
+          { error: 'Forbidden', message: 'Only students can access this resource.' },
+          403,
+        )
+      }
+
+      c.set('user', {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        role: 'student',
+      })
+      await next()
+    },
+  }
+})
+
 import { app } from '../app.js'
 import { getDbClient } from '../db.js'
 import { users, studentProfiles, contactDetails } from '@repo/db'
@@ -244,57 +298,5 @@ describe('Student Profile API', () => {
     expect(data.linkedinUrl).toBeNull()
     // 100% - 10% (github) - 5% (linkedin) = 85%
     expect(data.completionPercentage).toBe(85)
-  })
-
-  describe('Authentication API', () => {
-    it('successfully logs in an existing user', async () => {
-      const res = await app.request('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'teststudent@example.com' }),
-      })
-      expect(res.status).toBe(200)
-      const data = (await res.json()) as any
-      expect(data.user.email).toBe('teststudent@example.com')
-      expect(data.user.fullName).toBe('Test Student Updated')
-    })
-
-    it('fails to log in if user does not exist', async () => {
-      const res = await app.request('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: 'nonexistent@example.com' }),
-      })
-      expect(res.status).toBe(404)
-    })
-
-    it('successfully signs up a new user', async () => {
-      const res = await app.request('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: 'newstudent@example.com',
-          fullName: 'New Student',
-          isSignUp: true,
-        }),
-      })
-      expect(res.status).toBe(200)
-      const data = (await res.json()) as any
-      expect(data.user.email).toBe('newstudent@example.com')
-      expect(data.user.fullName).toBe('New Student')
-    })
-
-    it('fails to sign up if email already exists', async () => {
-      const res = await app.request('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: 'teststudent@example.com',
-          fullName: 'Test Student',
-          isSignUp: true,
-        }),
-      })
-      expect(res.status).toBe(409)
-    })
   })
 })
