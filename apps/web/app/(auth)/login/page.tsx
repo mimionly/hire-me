@@ -77,15 +77,23 @@ export default function LoginPage() {
     setState((s) => ({ ...s, isError: false }))
     sound.playPop(520)
 
-    const { error } = await authClient.signIn.social({
-      provider: 'google',
-      callbackURL: '/role-select',
-    })
+    try {
+      const { error } = await authClient.signIn.social({
+        provider: 'google',
+        callbackURL: '/role-select',
+      })
 
-    // On success the browser navigates to Google, so this only runs when the
-    // handshake could not be started at all.
-    if (error) {
-      failWith(error.message ?? 'Could not start Google sign-in. Please try again.')
+      // On success the browser navigates to Google, so this only runs when the
+      // handshake could not be started at all.
+      if (error) {
+        failWith(error.message ?? 'Could not start Google sign-in. Please try again.')
+      }
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Could not connect to authentication service. Please check your network and try again.'
+      failWith(message)
     }
   }
 

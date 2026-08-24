@@ -1,9 +1,25 @@
 'use client'
 
 import { motion, AnimatePresence } from 'motion/react'
-import { ArrowLeft, ArrowRight, Check, FileText, Globe, Plus, Sparkles, X } from 'lucide-react'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Building2,
+  Check,
+  Edit3,
+  FileText,
+  Globe,
+  LogOut,
+  MapPin,
+  Plus,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
+import confetti from 'canvas-confetti'
+import { apiFetch } from '@/lib/api-client'
+import { authClient } from '@/lib/auth/client'
 
 function GithubIcon({ className = 'w-4 h-4' }: { className?: string }) {
   return (
@@ -25,10 +41,51 @@ function LinkedinIcon({ className = 'w-4 h-4' }: { className?: string }) {
   )
 }
 
+interface Job {
+  id: string
+  title: string
+  employmentType?: string
+  workArrangement?: string
+  description?: string
+  location?: string
+  salaryRange?: string
+  recruiter?: {
+    companyName?: string
+  }
+}
+
+interface StudentProfileResponse {
+  id?: string
+  email?: string
+  fullName?: string | null
+  headline?: string | null
+  bio?: string | null
+  school?: string | null
+  degree?: string | null
+  gradYear?: number | null
+  gpa?: string | null
+  specialization?: string | null
+  skills?: string[] | null
+  experienceRole?: string | null
+  experienceCompany?: string | null
+  experienceSummary?: string | null
+  githubUrl?: string | null
+  linkedinUrl?: string | null
+  portfolioUrl?: string | null
+  resumeUrl?: string | null
+  phone?: string | null
+  openToWork?: boolean
+  dk24Status?: string | null
+  completionPercentage?: number
+}
+
 export default function StudentOnboardingPage() {
   const router = useRouter()
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
   const [isCompleted, setIsCompleted] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDashboardMode, setIsDashboardMode] = useState(false)
+  const [profileCompletion, setProfileCompletion] = useState(15)
 
   // Step 1: Basic Details
   const [fullName, setFullName] = useState('')
@@ -56,6 +113,13 @@ export default function StudentOnboardingPage() {
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [portfolioUrl, setPortfolioUrl] = useState('')
   const [resumeUrl, setResumeUrl] = useState('')
+  const [phone, setPhone] = useState('')
+  const [openToWork, setOpenToWork] = useState(true)
+  const [dk24Status, setDk24Status] = useState<string>('none')
+
+  // Opportunities Feed
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [isLoadingJobs, setIsLoadingJobs] = useState(false)
 
   // Interactive Character Eye Tracking & Blinking
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 })
@@ -84,6 +148,99 @@ export default function StudentOnboardingPage() {
     return () => clearInterval(interval)
   }, [])
 
+  // Load existing profile from API or LocalStorage on mount
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const data = await apiFetch<StudentProfileResponse>('/api/student/profile')
+        if (data) {
+          if (data.fullName) setFullName(data.fullName)
+          if (data.headline) setHeadline(data.headline)
+          if (data.bio) setBio(data.bio)
+          if (data.school) setSchool(data.school)
+          if (data.degree) setDegree(data.degree)
+          if (data.gradYear) setGraduationYear(String(data.gradYear))
+          if (data.gpa) setGpa(data.gpa)
+          if (data.specialization) setSpecialization(data.specialization)
+          if (data.skills && data.skills.length > 0) setSkills(data.skills)
+          if (data.experienceRole) setExperienceRole(data.experienceRole)
+          if (data.experienceCompany) setExperienceCompany(data.experienceCompany)
+          if (data.experienceSummary) setExperienceSummary(data.experienceSummary)
+          if (data.githubUrl) setGithubUrl(data.githubUrl)
+          if (data.linkedinUrl) setLinkedinUrl(data.linkedinUrl)
+          if (data.portfolioUrl) setPortfolioUrl(data.portfolioUrl)
+          if (data.resumeUrl) setResumeUrl(data.resumeUrl)
+          if (data.phone) setPhone(data.phone)
+          if (data.openToWork !== undefined) setOpenToWork(data.openToWork)
+          if (data.dk24Status) setDk24Status(data.dk24Status)
+          if (data.completionPercentage !== undefined) {
+            setProfileCompletion(data.completionPercentage)
+          }
+
+          // If profile has already been completed, enter dashboard view directly
+          if (
+            (data.completionPercentage && data.completionPercentage > 15) ||
+            (data.fullName && data.headline && data.school)
+          ) {
+            setIsDashboardMode(true)
+          }
+        }
+      } catch {
+        // Fallback to local storage if API is unauthenticated in dev
+        const cached = localStorage.getItem('student_profile')
+        if (cached) {
+          try {
+            const parsed = JSON.parse(cached)
+            if (parsed.name) setFullName(parsed.name)
+            if (parsed.headline) setHeadline(parsed.headline)
+            if (parsed.bio) setBio(parsed.bio)
+            if (parsed.school) setSchool(parsed.school)
+            if (parsed.degree) setDegree(parsed.degree)
+            if (parsed.graduationYear) setGraduationYear(parsed.graduationYear)
+            if (parsed.gpa) setGpa(parsed.gpa)
+            if (parsed.specialization) setSpecialization(parsed.specialization)
+            if (parsed.skills) setSkills(parsed.skills)
+            if (parsed.experienceRole) setExperienceRole(parsed.experienceRole)
+            if (parsed.experienceCompany) setExperienceCompany(parsed.experienceCompany)
+            if (parsed.experienceSummary) setExperienceSummary(parsed.experienceSummary)
+            if (parsed.githubUrl) setGithubUrl(parsed.githubUrl)
+            if (parsed.linkedinUrl) setLinkedinUrl(parsed.linkedinUrl)
+            if (parsed.portfolioUrl) setPortfolioUrl(parsed.portfolioUrl)
+            if (parsed.resumeUrl) setResumeUrl(parsed.resumeUrl)
+            if (parsed.name && parsed.headline) {
+              setIsDashboardMode(true)
+            }
+          } catch {
+            // ignore cache parse error
+          }
+        }
+      }
+    }
+
+    fetchProfile()
+  }, [])
+
+  // Load Job Postings for Opportunities Feed
+  useEffect(() => {
+    if (!isDashboardMode) return
+    const fetchJobs = async () => {
+      setIsLoadingJobs(true)
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8787'
+        const response = await fetch(`${apiUrl}/api/postings`)
+        if (response.ok) {
+          const data = (await response.json()) as { data?: Job[] }
+          setJobs(data.data || [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch job postings', err)
+      } finally {
+        setIsLoadingJobs(false)
+      }
+    }
+    fetchJobs()
+  }, [isDashboardMode])
+
   // Skills handlers
   const handleAddSkill = (skillToAdd?: string) => {
     const target = (skillToAdd || newSkillInput).trim()
@@ -98,8 +255,8 @@ export default function StudentOnboardingPage() {
     setSkills(skills.filter((s) => s !== skillToRemove))
   }
 
-  // Stepper navigation
-  const handleNext = () => {
+  // Stepper navigation & profile submission
+  const handleNext = async () => {
     if (step === 1) {
       if (!fullName.trim() || !headline.trim()) {
         setStep1Error('Please fill in your full name and headline.')
@@ -117,29 +274,79 @@ export default function StudentOnboardingPage() {
     } else if (step === 3) {
       setStep(4)
     } else if (step === 4) {
+      setIsSaving(true)
+      setIsCompleted(true)
+
       const studentProfile = {
         name: fullName.trim(),
-        headline,
-        bio,
-        school,
-        degree,
+        headline: headline.trim(),
+        bio: bio.trim(),
+        school: school.trim(),
+        degree: degree.trim(),
         graduationYear,
-        gpa,
-        specialization,
+        gpa: gpa.trim(),
+        specialization: specialization.trim(),
         skills,
-        experienceRole,
-        experienceCompany,
-        experienceSummary,
-        githubUrl,
-        linkedinUrl,
-        portfolioUrl,
-        resumeUrl,
+        experienceRole: experienceRole.trim(),
+        experienceCompany: experienceCompany.trim(),
+        experienceSummary: experienceSummary.trim(),
+        githubUrl: githubUrl.trim(),
+        linkedinUrl: linkedinUrl.trim(),
+        portfolioUrl: portfolioUrl.trim(),
+        resumeUrl: resumeUrl.trim(),
       }
       localStorage.setItem('student_profile', JSON.stringify(studentProfile))
-      setIsCompleted(true)
+
+      const payload = {
+        fullName: fullName.trim(),
+        headline: headline.trim() || null,
+        bio: bio.trim() || null,
+        gradYear: graduationYear ? parseInt(graduationYear, 10) : null,
+        openToWork,
+        resumeUrl: resumeUrl.trim() || null,
+        githubUrl: githubUrl.trim() || null,
+        linkedinUrl: linkedinUrl.trim() || null,
+        portfolioUrl: portfolioUrl.trim() || null,
+        phone: phone.trim() || null,
+        skills,
+        experienceRole: experienceRole.trim() || null,
+        experienceCompany: experienceCompany.trim() || null,
+        experienceSummary: experienceSummary.trim() || null,
+        school: school.trim() || null,
+        degree: degree.trim() || null,
+        gpa: gpa.trim() || null,
+        specialization: specialization.trim() || null,
+      }
+
+      try {
+        const response = await apiFetch<StudentProfileResponse>('/api/student/profile', {
+          method: 'PUT',
+          body: payload,
+        })
+        if (response?.completionPercentage !== undefined) {
+          setProfileCompletion(response.completionPercentage)
+        }
+      } catch (err) {
+        console.warn('Could not save to API Worker directly (proceeding with local state):', err)
+      } finally {
+        setIsSaving(false)
+      }
+
+      try {
+        confetti({
+          particleCount: 90,
+          spread: 75,
+          origin: { y: 0.6 },
+          colors: ['#00C26D', '#34D399', '#10B981', '#059669', '#3B82F6'],
+        })
+      } catch {
+        // Confetti fallback
+      }
+
       setTimeout(() => {
-        router.push('/student')
-      }, 1200)
+        setIsCompleted(false)
+        setIsDashboardMode(true)
+      }, 1000)
     }
   }
 
@@ -151,9 +358,322 @@ export default function StudentOnboardingPage() {
     }
   }
 
+  const handleSignOut = async () => {
+    try {
+      await authClient.signOut()
+    } catch {
+      // ignore
+    }
+    localStorage.clear()
+    router.push('/login')
+  }
+
   const gradYearOptions = ['2024', '2025', '2026', '2027', '2028', '2029', '2030']
   const popularSkills = ['Python', 'JavaScript', 'Node.js', 'SQL', 'Docker', 'Git', 'Java']
 
+  // =========================================================================
+  // VIEW: STUDENT DASHBOARD (Shown after profile completion)
+  // =========================================================================
+  if (isDashboardMode) {
+    return (
+      <div className="min-h-screen w-full bg-[#F8FAFC] text-text-main flex flex-col font-['Plus_Jakarta_Sans',sans-serif] selection:bg-brand/20">
+        {/* Top Dashboard Navbar */}
+        <header className="bg-white border-b border-border-subtle sticky top-0 z-30 shrink-0">
+          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div
+              className="flex items-center gap-1.5 text-2xl tracking-tight cursor-pointer"
+              onClick={() => router.push('/')}
+            >
+              <span className="font-black text-brand font-mono">DK24</span>
+              <span className="font-bold text-text-main">CareerLink</span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsDashboardMode(false)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs sm:text-sm transition cursor-pointer active:scale-95"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Edit Profile</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs sm:text-sm transition cursor-pointer active:scale-95"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Dashboard Content Grid */}
+        <div className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+          {/* Left Column: Student Profile Card */}
+          <aside className="lg:col-span-4 space-y-6">
+            <div className="bg-white rounded-3xl border border-border-subtle p-6 shadow-[0_6px_30px_-6px_rgba(0,0,0,0.05)] space-y-5">
+              {/* Avatar & Header */}
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-2xl bg-brand-light text-brand-dark flex items-center justify-center font-black text-2xl uppercase shrink-0 border border-brand/20">
+                  {fullName ? fullName[0] : 'S'}
+                </div>
+                <div>
+                  <h2 className="text-xl font-extrabold text-text-main leading-tight">
+                    {fullName || 'Student'}
+                  </h2>
+                  <p className="text-xs font-semibold text-brand mt-0.5">
+                    {headline || 'Career Seeker'}
+                  </p>
+                </div>
+              </div>
+
+              {bio && <p className="text-sm text-text-muted leading-relaxed italic">"{bio}"</p>}
+
+              {/* Progress Gauge */}
+              <div className="pt-3 border-t border-border-subtle/70">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 mb-1.5">
+                  <span>Profile Strength</span>
+                  <span className="text-brand font-extrabold">{profileCompletion}%</span>
+                </div>
+                <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                  <div
+                    className="bg-brand h-full transition-all duration-500 rounded-full"
+                    style={{ width: `${Math.max(15, profileCompletion)}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* DK24 Application Status */}
+              <div className="flex items-center justify-between text-xs pt-1">
+                <span className="font-bold text-text-muted">DK24 Status:</span>
+                <span
+                  className={`px-2.5 py-0.5 rounded-full font-bold uppercase text-[10px] tracking-wider ${
+                    dk24Status === 'approved'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : dk24Status === 'pending'
+                        ? 'bg-amber-100 text-amber-800'
+                        : dk24Status === 'rejected'
+                          ? 'bg-red-100 text-red-800'
+                          : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  {dk24Status || 'Active Candidate'}
+                </span>
+              </div>
+
+              {/* Education details */}
+              <div className="pt-3 border-t border-border-subtle/70 space-y-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
+                  Education
+                </h3>
+                <div className="text-xs sm:text-sm space-y-1.5">
+                  {school && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-700 shrink-0">School:</span>
+                      <span className="text-slate-600 font-medium">{school}</span>
+                    </div>
+                  )}
+                  {degree && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-700 shrink-0">Degree:</span>
+                      <span className="text-slate-600 font-medium">{degree}</span>
+                    </div>
+                  )}
+                  {graduationYear && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-700 shrink-0">Class:</span>
+                      <span className="text-slate-600 font-medium">{graduationYear}</span>
+                    </div>
+                  )}
+                  {gpa && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-700 shrink-0">GPA:</span>
+                      <span className="text-slate-600 font-medium">{gpa}</span>
+                    </div>
+                  )}
+                  {specialization && (
+                    <div className="flex items-start gap-2">
+                      <span className="font-bold text-slate-700 shrink-0">Focus:</span>
+                      <span className="text-slate-600 font-medium">{specialization}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Skills */}
+              {skills.length > 0 && (
+                <div className="pt-3 border-t border-border-subtle/70 space-y-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
+                    Skills
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {skills.map((s) => (
+                      <span
+                        key={s}
+                        className="px-2.5 py-1 bg-brand-light text-brand-dark rounded-lg text-xs font-bold border border-brand/15"
+                      >
+                        {s}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Experience */}
+              {experienceRole && (
+                <div className="pt-3 border-t border-border-subtle/70 space-y-1.5">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-text-muted">
+                    Experience
+                  </h3>
+                  <div className="text-xs sm:text-sm">
+                    <p className="font-bold text-slate-800">{experienceRole}</p>
+                    <p className="text-xs font-bold text-slate-500">{experienceCompany}</p>
+                    {experienceSummary && (
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        {experienceSummary}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Profile Links */}
+              <div className="pt-3 border-t border-border-subtle/70 flex gap-3 text-slate-400">
+                {githubUrl && (
+                  <a
+                    href={githubUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-brand transition p-1"
+                    title="GitHub"
+                  >
+                    <GithubIcon className="w-5 h-5" />
+                  </a>
+                )}
+                {linkedinUrl && (
+                  <a
+                    href={linkedinUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-brand transition p-1"
+                    title="LinkedIn"
+                  >
+                    <LinkedinIcon className="w-5 h-5" />
+                  </a>
+                )}
+                {portfolioUrl && (
+                  <a
+                    href={portfolioUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-brand transition p-1"
+                    title="Portfolio"
+                  >
+                    <Globe className="w-5 h-5" />
+                  </a>
+                )}
+                {resumeUrl && (
+                  <a
+                    href={resumeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="hover:text-brand transition p-1"
+                    title="Resume"
+                  >
+                    <FileText className="w-5 h-5" />
+                  </a>
+                )}
+              </div>
+            </div>
+          </aside>
+
+          {/* Right Column: Opportunities Feed */}
+          <main className="lg:col-span-8 space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-2xl font-extrabold text-text-main tracking-tight">
+                  Open Opportunities
+                </h2>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Hand-picked roles from verified companies looking for talent.
+                </p>
+              </div>
+              <span className="px-3 py-1 bg-brand-light text-brand-dark rounded-full text-xs font-bold uppercase tracking-wider border border-brand/20">
+                {jobs.length} roles open
+              </span>
+            </div>
+
+            {isLoadingJobs ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3 bg-white rounded-3xl border border-border-subtle">
+                <span className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand" />
+                <p className="text-xs font-semibold text-text-muted">Loading opportunities...</p>
+              </div>
+            ) : jobs.length === 0 ? (
+              <div className="bg-white rounded-3xl border border-border-subtle p-12 text-center shadow-xs space-y-3">
+                <Building2 className="w-12 h-12 text-slate-300 mx-auto" />
+                <p className="text-text-main font-bold text-sm">Welcome to DK24 CareerLink!</p>
+                <p className="text-text-muted text-xs max-w-sm mx-auto leading-relaxed">
+                  Your profile has been created and saved. Companies on the DK24 network will be
+                  able to discover your profile for matching opportunities.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {jobs.map((job) => (
+                  <div
+                    key={job.id}
+                    className="bg-white rounded-3xl border border-border-subtle p-5 shadow-xs hover:shadow-md transition flex flex-col justify-between hover:border-slate-300"
+                  >
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-start gap-2">
+                        <span className="px-2.5 py-0.5 bg-slate-100 text-slate-600 rounded-md text-[10px] font-bold uppercase tracking-wider">
+                          {job.employmentType || 'Full-time'}
+                        </span>
+                        <span className="text-[10px] font-bold text-brand uppercase tracking-wider bg-brand-light px-2 py-0.5 rounded-md">
+                          {job.workArrangement || 'Hybrid'}
+                        </span>
+                      </div>
+                      <div>
+                        <h4 className="text-base font-extrabold text-text-main line-clamp-1">
+                          {job.title}
+                        </h4>
+                        <p className="text-xs font-bold text-text-muted">
+                          {job.recruiter?.companyName || 'Verified Partner'}
+                        </p>
+                      </div>
+                      {job.description && (
+                        <p className="text-xs text-text-muted line-clamp-2 leading-relaxed">
+                          {job.description}
+                        </p>
+                      )}
+                    </div>
+                    <div className="pt-4 mt-4 border-t border-border-subtle/70 flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                      <span className="flex items-center gap-1">
+                        <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                        {job.location || 'Remote'}
+                      </span>
+                      {job.salaryRange && (
+                        <span className="font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          {job.salaryRange}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </main>
+        </div>
+      </div>
+    )
+  }
+
+  // =========================================================================
+  // VIEW: STEPPER ONBOARDING WIZARD
+  // =========================================================================
   return (
     <div
       ref={containerRef}
@@ -963,7 +1483,7 @@ export default function StudentOnboardingPage() {
               <button
                 type="button"
                 onClick={handleNext}
-                disabled={isCompleted}
+                disabled={isSaving}
                 className="flex items-center gap-2 px-5 sm:px-6 py-2 rounded-xl bg-action-dark hover:bg-black text-white font-semibold text-xs sm:text-sm transition shadow-md hover:shadow-lg cursor-pointer active:scale-[0.98]"
               >
                 {step < 4 ? (
@@ -973,7 +1493,9 @@ export default function StudentOnboardingPage() {
                   </>
                 ) : (
                   <>
-                    <span>{isCompleted ? 'Profile Created!' : 'Finish Setup'}</span>
+                    <span>
+                      {isSaving ? 'Saving...' : isCompleted ? 'Profile Created!' : 'Finish Setup'}
+                    </span>
                     <Sparkles className="w-4 h-4 text-brand-emerald" />
                   </>
                 )}

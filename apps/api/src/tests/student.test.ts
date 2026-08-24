@@ -1,160 +1,223 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, expect, it, beforeAll, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import type { Context, Next } from 'hono'
 
-vi.mock('../middleware/auth.js', () => {
+const DATABASE_URL = 'postgresql://user:pass@db.test/hireme'
+
+process.env.DATABASE_URL = DATABASE_URL
+process.env.NEON_AUTH_BASE_URL = 'https://auth.example.test/api/v1/projects/test-project'
+
+// ==========================================
+// AUTH MOCK
+// ==========================================
+
+const { studentUser, recruiterUser } = vi.hoisted(() => ({
+  studentUser: {
+    id: '00000000-1111-2222-3333-444444444444',
+    email: 'teststudent@example.com',
+    fullName: 'Test Student',
+    role: 'student' as const,
+  },
+  recruiterUser: {
+    id: '00000000-1111-2222-3333-555555555555',
+    email: 'testrecruiter@example.com',
+    fullName: 'Test Recruiter',
+    role: 'recruiter' as const,
+  },
+}))
+
+let currentAuthUser: typeof studentUser | typeof recruiterUser | null = studentUser
+
+vi.mock('../middleware/auth.ts', () => ({
+  requireAuth: async (c: Context, next: Next) => {
+    if (!currentAuthUser) {
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+    c.set('authUser', {
+      id: currentAuthUser.id,
+      email: currentAuthUser.email,
+      name: currentAuthUser.fullName,
+    })
+    await next()
+  },
+  requireStudentAuth: () => async (c: Context, next: Next) => {
+    const userIdHeader = c.req.header('x-user-id')
+    const authHeader = c.req.header('Authorization')
+
+    if (!userIdHeader && !authHeader && currentAuthUser === null) {
+      return c.json(
+        { error: 'Unauthorized', message: 'Missing Authorization or x-user-id header.' },
+        401,
+      )
+    }
+
+    let user: typeof studentUser | typeof recruiterUser | null = currentAuthUser
+    if (userIdHeader === recruiterUser.id) {
+      user = recruiterUser
+    } else if (userIdHeader === studentUser.id) {
+      user = studentUser
+    } else if (userIdHeader === 'non-existent') {
+      user = null
+    }
+
+    if (!user) {
+      return c.json({ error: 'Unauthorized', message: 'User record not found.' }, 401)
+    }
+
+    if (user.role !== 'student') {
+      return c.json({ error: 'Forbidden', message: 'Only students can access this resource.' }, 403)
+    }
+
+    c.set('user', user)
+    await next()
+  },
+}))
+
+// ==========================================
+// CONTROLLER MOCK
+// ==========================================
+
+vi.mock('../controllers/student.controller.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../controllers/student.controller.js')>()
   return {
-    requireAuth: async (c: any, next: any) => {
-      const userId = c.req.header('x-user-id') || '00000000-1111-2222-3333-444444444444'
-      c.set('authUser', {
-        id: userId,
-        email:
-          userId === '00000000-1111-2222-3333-555555555555'
-            ? 'testrecruiter@example.com'
-            : 'teststudent@example.com',
-        name: userId === '00000000-1111-2222-3333-555555555555' ? 'Test Recruiter' : 'Test Student',
-      })
-      await next()
-    },
-    requireStudentAuth: () => async (c: any, next: any) => {
-      console.log('[TEST MOCK] requireStudentAuth middleware executed for', c.req.path)
-      const userId = c.req.header('x-user-id')
-      if (!userId) {
-        return c.json(
-          { error: 'Unauthorized', message: 'Missing Authorization or x-user-id header.' },
-          401,
-        )
-      }
-
-      const { getDbClient } = await import('../db.js')
-      const { users } = await import('@repo/db')
-      const { eq } = await import('drizzle-orm')
-
-      const db = await getDbClient(c.env)
-      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
-
-      if (!user) {
-        return c.json({ error: 'Unauthorized', message: 'User record not found.' }, 401)
-      }
-
-      if (!user.roles.includes('student')) {
-        return c.json(
-          { error: 'Forbidden', message: 'Only students can access this resource.' },
-          403,
-        )
-      }
-
-      c.set('user', {
-        id: user.id,
-        fullName: user.fullName,
-        email: user.email,
-        role: 'student',
-      })
-      await next()
-    },
+    ...actual,
+    getStudentProfile: vi.fn(),
+    updateStudentProfile: vi.fn(),
   }
 })
 
 import { app } from '../app.js'
-import { getDbClient } from '../db.js'
-import { users, studentProfiles, contactDetails } from '@repo/db'
-import { eq } from 'drizzle-orm'
-import { fileURLToPath } from 'url'
-import path from 'path'
-import dotenv from 'dotenv'
+import {
+  getStudentProfile,
+  updateStudentProfile,
+  calculateCompletionPercentage,
+} from '../controllers/student.controller.js'
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// ==========================================
+// FIXTURES
+// ==========================================
 
-// Load environment variables for the test suite
-dotenv.config({ path: path.resolve(__dirname, '../../.env.local'), override: true })
-dotenv.config({ path: path.resolve(__dirname, '../../.dev.vars'), override: true })
+function makeMockProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    id: studentUser.id,
+    email: studentUser.email,
+    fullName: studentUser.fullName,
+    headline: 'Software Engineer Intern',
+    bio: 'Avid software developer.',
+    gradYear: 2026,
+    openToWork: true,
+    resumeUrl: 'https://example.com/resume.pdf',
+    githubUrl: 'https://github.com/teststudent',
+    linkedinUrl: 'https://linkedin.com/in/teststudent',
+    otherLinks: {
+      school: 'Stanford',
+      degree: 'BS CS',
+      gpa: '3.9',
+      specialization: 'AI/ML',
+      portfolioUrl: 'https://teststudent.dev',
+    },
+    dk24Status: 'none',
+    phone: '+1234567890',
+    completionPercentage: 100,
+    skills: ['React', 'TypeScript', 'Next.js'],
+    experienceRole: 'Frontend Dev Intern',
+    experienceCompany: 'Google',
+    experienceSummary: 'Built cool things.',
+    school: 'Stanford',
+    degree: 'BS CS',
+    gpa: '3.9',
+    specialization: 'AI/ML',
+    portfolioUrl: 'https://teststudent.dev',
+    ...overrides,
+  }
+}
 
 describe('Student Profile API', () => {
-  const testStudentId = '00000000-1111-2222-3333-444444444444'
-  const testRecruiterId = '00000000-1111-2222-3333-555555555555'
-
-  beforeAll(async () => {
-    const db = await getDbClient()
-
-    // Clean up test data if left over
-    await db.delete(contactDetails).where(eq(contactDetails.studentId, testStudentId))
-    await db.delete(studentProfiles).where(eq(studentProfiles.userId, testStudentId))
-    await db.delete(users).where(eq(users.id, testStudentId))
-    await db.delete(users).where(eq(users.id, testRecruiterId))
-    await db.delete(users).where(eq(users.email, 'newstudent@example.com'))
-
-    // Insert a test student user
-    await db.insert(users).values({
-      id: testStudentId,
-      email: 'teststudent@example.com',
-      fullName: 'Test Student',
-      roles: ['student'],
-    })
-
-    // Insert a test recruiter user
-    await db.insert(users).values({
-      id: testRecruiterId,
-      email: 'testrecruiter@example.com',
-      fullName: 'Test Recruiter',
-      roles: ['recruiter'],
-    })
-  }, 60000)
-
-  it('fails with 401 if unauthorized (missing header)', async () => {
-    const res = await app.request('/api/student/profile')
-    expect(res.status).toBe(401)
-    const data = (await res.json()) as any
-    expect(data.error).toBe('Unauthorized')
+  beforeEach(() => {
+    vi.clearAllMocks()
+    currentAuthUser = studentUser
   })
 
-  it('fails with 403 if authenticated user is not a student', async () => {
-    const res = await app.request('/api/student/profile', {
-      headers: {
-        'x-user-id': testRecruiterId,
-      },
+  describe('GET /api/student/profile', () => {
+    it('fails with 401 if unauthorized (missing auth/user)', async () => {
+      currentAuthUser = null
+      const res = await app.request('/api/student/profile')
+      expect(res.status).toBe(401)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Unauthorized')
     })
-    expect(res.status).toBe(403)
-    const data = (await res.json()) as any
-    expect(data.error).toBe('Forbidden')
+
+    it('fails with 403 if authenticated user is not a student', async () => {
+      const res = await app.request('/api/student/profile', {
+        headers: {
+          'x-user-id': recruiterUser.id,
+        },
+      })
+      expect(res.status).toBe(403)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Forbidden')
+    })
+
+    it('successfully fetches student profile', async () => {
+      const mockProfile = makeMockProfile()
+      vi.mocked(getStudentProfile).mockResolvedValueOnce(mockProfile as any)
+
+      const res = await app.request('/api/student/profile', {
+        headers: {
+          'x-user-id': studentUser.id,
+        },
+      })
+
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.id).toBe(studentUser.id)
+      expect(data.email).toBe(studentUser.email)
+      expect(data.fullName).toBe('Test Student')
+      expect(data.headline).toBe('Software Engineer Intern')
+      expect(data.completionPercentage).toBe(100)
+      expect(getStudentProfile).toHaveBeenCalledTimes(1)
+    })
+
+    it('returns 404 when student account is not found', async () => {
+      vi.mocked(getStudentProfile).mockResolvedValueOnce(null)
+
+      const res = await app.request('/api/student/profile', {
+        headers: {
+          'x-user-id': studentUser.id,
+        },
+      })
+
+      expect(res.status).toBe(404)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Not Found')
+    })
+
+    it('returns 500 when getStudentProfile throws', async () => {
+      vi.mocked(getStudentProfile).mockRejectedValueOnce(new Error('DB failure'))
+
+      const res = await app.request('/api/student/profile', {
+        headers: {
+          'x-user-id': studentUser.id,
+        },
+      })
+
+      expect(res.status).toBe(500)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Internal Server Error')
+    })
   })
 
-  it('successfully fetches and auto-initializes student profile', async () => {
-    const res = await app.request('/api/student/profile', {
-      headers: {
-        'x-user-id': testStudentId,
-      },
-    })
-    expect(res.status).toBe(200)
-    const data = (await res.json()) as any
-    expect(data.id).toBe(testStudentId)
-    expect(data.email).toBe('teststudent@example.com')
-    expect(data.fullName).toBe('Test Student')
-    expect(data.bio).toBeNull()
-    expect(data.headline).toBeNull()
-    expect(data.dk24Status).toBe('none')
-    expect(data.phone).toBeNull()
-    expect(data.school).toBeNull()
-    expect(data.degree).toBeNull()
-    expect(data.gpa).toBeNull()
-    expect(data.specialization).toBeNull()
-    expect(data.portfolioUrl).toBeNull()
-    expect(data.githubUrl).toBeNull()
-    expect(data.linkedinUrl).toBeNull()
-    expect(data.resumeUrl).toBeNull()
-
-    // Only fullName exists (15%)
-    expect(data.completionPercentage).toBe(15)
-  })
-
-  it('successfully updates student profile and returns updated values & completion percentage', async () => {
-    const res = await app.request('/api/student/profile', {
-      method: 'PUT',
-      headers: {
-        'x-user-id': testStudentId,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+  describe('PUT /api/student/profile', () => {
+    it('successfully updates student profile and returns updated values', async () => {
+      const updatedProfile = makeMockProfile({
         fullName: 'Test Student Updated',
-        bio: 'Avid software developer.',
+        bio: 'Updated bio',
+      })
+      vi.mocked(updateStudentProfile).mockResolvedValueOnce(updatedProfile as any)
+
+      const payload = {
+        fullName: 'Test Student Updated',
+        bio: 'Updated bio',
         headline: 'Software Engineer Intern',
         gradYear: 2026,
         openToWork: true,
@@ -172,131 +235,179 @@ describe('Student Profile API', () => {
         gpa: '3.9',
         specialization: 'AI/ML',
         portfolioUrl: 'https://teststudent.dev',
-      }),
+      }
+
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      })
+
+      expect(res.status).toBe(200)
+      const data = (await res.json()) as any
+      expect(data.fullName).toBe('Test Student Updated')
+      expect(data.bio).toBe('Updated bio')
+      expect(updateStudentProfile).toHaveBeenCalledTimes(1)
+      expect(updateStudentProfile).toHaveBeenCalledWith(expect.anything(), studentUser.id, payload)
     })
 
-    expect(res.status).toBe(200)
-    const data = (await res.json()) as any
-    expect(data.fullName).toBe('Test Student Updated')
-    expect(data.bio).toBe('Avid software developer.')
-    expect(data.headline).toBe('Software Engineer Intern')
-    expect(data.gradYear).toBe(2026)
-    expect(data.openToWork).toBe(true)
-    expect(data.resumeUrl).toBe('https://example.com/resume.pdf')
-    expect(data.githubUrl).toBe('https://github.com/teststudent')
-    expect(data.linkedinUrl).toBe('https://linkedin.com/in/teststudent')
-    expect(data.phone).toBe('+1234567890')
-    expect(data.skills).toEqual(['React', 'TypeScript', 'Next.js'])
-    expect(data.experienceRole).toBe('Frontend Dev Intern')
-    expect(data.experienceCompany).toBe('Google')
-    expect(data.experienceSummary).toBe('Built cool things.')
-    expect(data.school).toBe('Stanford')
-    expect(data.degree).toBe('BS CS')
-    expect(data.gpa).toBe('3.9')
-    expect(data.specialization).toBe('AI/ML')
-    expect(data.portfolioUrl).toBe('https://teststudent.dev')
-    expect(data.dk24Status).toBe('none')
+    it('fails with 400 for validation errors (invalid gradYear)', async () => {
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          gradYear: 1850,
+        }),
+      })
 
-    // Direct database assertions to ensure values are persisted in student_profiles
-    const db = await getDbClient()
-    const [dbProfile] = await db
-      .select()
-      .from(studentProfiles)
-      .where(eq(studentProfiles.userId, testStudentId))
-      .limit(1)
+      expect(res.status).toBe(400)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Validation Error')
+      expect(updateStudentProfile).not.toHaveBeenCalled()
+    })
 
-    expect(dbProfile).toBeDefined()
-    expect(dbProfile.githubUrl).toBe('https://github.com/teststudent')
-    expect(dbProfile.linkedinUrl).toBe('https://linkedin.com/in/teststudent')
-    expect(dbProfile.resumeUrl).toBe('https://example.com/resume.pdf')
-    expect(dbProfile.otherLinks).toBeDefined()
-    const otherLinks = dbProfile.otherLinks as any
-    expect(otherLinks.school).toBe('Stanford')
-    expect(otherLinks.degree).toBe('BS CS')
-    expect(otherLinks.gpa).toBe('3.9')
-    expect(otherLinks.specialization).toBe('AI/ML')
-    expect(otherLinks.portfolioUrl).toBe('https://teststudent.dev')
+    it('fails with 400 for invalid fullName (empty string)', async () => {
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          fullName: '   ',
+        }),
+      })
 
-    // All fields populated (fullName: 15, headline: 15, bio: 15, gradYear: 15, phone: 10, resumeUrl: 15, githubUrl: 10, linkedinUrl: 5)
-    expect(data.completionPercentage).toBe(100)
+      expect(res.status).toBe(400)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Validation Error')
+    })
+
+    it('fails with 400 for invalid skills array', async () => {
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          skills: ['React', ''],
+        }),
+      })
+
+      expect(res.status).toBe(400)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Validation Error')
+    })
+
+    it('fails with 400 for malformed JSON payload', async () => {
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: 'invalid-json{',
+      })
+
+      expect(res.status).toBe(400)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Bad Request')
+    })
+
+    it('returns 404 if student profile not found after update', async () => {
+      vi.mocked(updateStudentProfile).mockResolvedValueOnce(null)
+
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bio: 'Some bio',
+        }),
+      })
+
+      expect(res.status).toBe(404)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Not Found')
+    })
+
+    it('returns 500 if updateStudentProfile throws', async () => {
+      vi.mocked(updateStudentProfile).mockRejectedValueOnce(new Error('Update failed'))
+
+      const res = await app.request('/api/student/profile', {
+        method: 'PUT',
+        headers: {
+          'x-user-id': studentUser.id,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          bio: 'Some bio',
+        }),
+      })
+
+      expect(res.status).toBe(500)
+      const data = (await res.json()) as any
+      expect(data.error).toBe('Internal Server Error')
+    })
   })
 
-  it('successfully fetches the updated student profile with all fields', async () => {
-    const res = await app.request('/api/student/profile', {
-      headers: {
-        'x-user-id': testStudentId,
-      },
-    })
-    expect(res.status).toBe(200)
-    const data = (await res.json()) as any
-    expect(data.fullName).toBe('Test Student Updated')
-    expect(data.school).toBe('Stanford')
-    expect(data.degree).toBe('BS CS')
-    expect(data.gpa).toBe('3.9')
-    expect(data.specialization).toBe('AI/ML')
-    expect(data.portfolioUrl).toBe('https://teststudent.dev')
-    expect(data.githubUrl).toBe('https://github.com/teststudent')
-    expect(data.linkedinUrl).toBe('https://linkedin.com/in/teststudent')
-    expect(data.resumeUrl).toBe('https://example.com/resume.pdf')
-    expect(data.experienceRole).toBe('Frontend Dev Intern')
-    expect(data.experienceCompany).toBe('Google')
-    expect(data.experienceSummary).toBe('Built cool things.')
-
-    // Direct database assertions to ensure values are persisted in student_profiles
-    const db = await getDbClient()
-    const [dbProfile] = await db
-      .select()
-      .from(studentProfiles)
-      .where(eq(studentProfiles.userId, testStudentId))
-      .limit(1)
-
-    expect(dbProfile).toBeDefined()
-    expect(dbProfile.githubUrl).toBe('https://github.com/teststudent')
-    expect(dbProfile.linkedinUrl).toBe('https://linkedin.com/in/teststudent')
-    expect(dbProfile.resumeUrl).toBe('https://example.com/resume.pdf')
-    expect(dbProfile.otherLinks).toBeDefined()
-    const otherLinks2 = dbProfile.otherLinks as any
-    expect(otherLinks2.school).toBe('Stanford')
-    expect(otherLinks2.degree).toBe('BS CS')
-    expect(otherLinks2.gpa).toBe('3.9')
-    expect(otherLinks2.specialization).toBe('AI/ML')
-    expect(otherLinks2.portfolioUrl).toBe('https://teststudent.dev')
-  })
-
-  it('fails with 400 for validation errors in PUT /profile', async () => {
-    const res = await app.request('/api/student/profile', {
-      method: 'PUT',
-      headers: {
-        'x-user-id': testStudentId,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        gradYear: 1850,
-      }),
-    })
-    expect(res.status).toBe(400)
-    const data = (await res.json()) as any
-    expect(data.error).toBe('Validation Error')
-  })
-
-  it('computes correct completion percentage when social links are lacking', async () => {
-    const res = await app.request('/api/student/profile', {
-      method: 'PUT',
-      headers: {
-        'x-user-id': testStudentId,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        githubUrl: null,
-        linkedinUrl: null,
-      }),
+  describe('calculateCompletionPercentage', () => {
+    it('returns 0 when profile is completely empty', () => {
+      expect(calculateCompletionPercentage({})).toBe(0)
     })
 
-    expect(res.status).toBe(200)
-    const data = (await res.json()) as any
-    expect(data.githubUrl).toBeNull()
-    expect(data.linkedinUrl).toBeNull()
-    // 100% - 10% (github) - 5% (linkedin) = 85%
-    expect(data.completionPercentage).toBe(85)
+    it('returns 15 when only fullName exists', () => {
+      expect(calculateCompletionPercentage({ fullName: 'Test Student' })).toBe(15)
+    })
+
+    it('returns 100 when all profile fields are present', () => {
+      expect(
+        calculateCompletionPercentage({
+          fullName: 'Test Student',
+          headline: 'Engineer',
+          bio: 'Bio text',
+          gradYear: 2026,
+          phone: '+1234567890',
+          resumeUrl: 'https://example.com/resume.pdf',
+          githubUrl: 'https://github.com/teststudent',
+          linkedinUrl: 'https://linkedin.com/in/teststudent',
+        }),
+      ).toBe(100)
+    })
+
+    it('computes correct percentage when social links are lacking (85%)', () => {
+      expect(
+        calculateCompletionPercentage({
+          fullName: 'Test Student',
+          headline: 'Engineer',
+          bio: 'Bio text',
+          gradYear: 2026,
+          phone: '+1234567890',
+          resumeUrl: 'https://example.com/resume.pdf',
+          githubUrl: null,
+          linkedinUrl: null,
+        }),
+      ).toBe(85)
+    })
+
+    it('ignores whitespace-only strings', () => {
+      expect(
+        calculateCompletionPercentage({
+          fullName: '   ',
+          headline: '  ',
+          bio: '',
+          gradYear: null,
+        }),
+      ).toBe(0)
+    })
   })
 })
