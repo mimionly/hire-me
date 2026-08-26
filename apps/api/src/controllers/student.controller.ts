@@ -29,12 +29,12 @@ export interface UpdateProfilePayload {
   experienceSummary?: string | null
   school?: string | null
   degree?: string | null
-  gpa?: string | null
+  gpa?: number | null
   specialization?: string | null
   portfolioUrl?: string | null
 }
 
-export function calculateCompletionPercentage(profile: {
+type CompletionProfileFields = {
   fullName?: string | null
   headline?: string | null
   bio?: string | null
@@ -43,17 +43,46 @@ export function calculateCompletionPercentage(profile: {
   resumeUrl?: string | null
   githubUrl?: string | null
   linkedinUrl?: string | null
-}): number {
-  let percentage = 0
-  if (profile.fullName && profile.fullName.trim() !== '') percentage += 15
-  if (profile.headline && profile.headline.trim() !== '') percentage += 15
-  if (profile.bio && profile.bio.trim() !== '') percentage += 15
-  if (profile.gradYear !== null && profile.gradYear !== undefined) percentage += 15
-  if (profile.phone && profile.phone.trim() !== '') percentage += 10
-  if (profile.resumeUrl && profile.resumeUrl.trim() !== '') percentage += 15
-  if (profile.githubUrl && profile.githubUrl.trim() !== '') percentage += 10
-  if (profile.linkedinUrl && profile.linkedinUrl.trim() !== '') percentage += 5
-  return percentage
+}
+
+const COMPLETION_FIELD_POINTS: Record<keyof CompletionProfileFields, number> = {
+  fullName: 15,
+  headline: 15,
+  bio: 15,
+  gradYear: 15,
+  phone: 10,
+  resumeUrl: 15,
+  githubUrl: 10,
+  linkedinUrl: 5,
+}
+
+// Default row shape used both when auto-initializing a student profile
+// (getStudentProfile) and when inserting a fresh row from an update
+// payload (updateStudentProfile).
+const DEFAULT_STUDENT_PROFILE_VALUES = {
+  headline: null,
+  bio: null,
+  gradYear: null,
+  openToWork: false,
+  resumeUrl: null,
+  githubUrl: null,
+  linkedinUrl: null,
+  otherLinks: null,
+  dk24Status: 'none',
+} as const
+
+export function calculateCompletionPercentage(profile: CompletionProfileFields): number {
+  return (Object.keys(COMPLETION_FIELD_POINTS) as Array<keyof CompletionProfileFields>).reduce(
+    (total, field) => {
+      const value = profile[field]
+      const isFilled =
+        typeof value === 'number'
+          ? value !== null && value !== undefined
+          : typeof value === 'string' && value.trim() !== ''
+      return isFilled ? total + COMPLETION_FIELD_POINTS[field] : total
+    },
+    0,
+  )
 }
 
 // ==========================================
@@ -84,18 +113,16 @@ export async function getStudentProfile(db: Database, userId: string) {
       .insert(studentProfiles)
       .values({
         userId,
-        headline: null,
-        bio: null,
-        gradYear: null,
-        openToWork: false,
-        resumeUrl: null,
-        githubUrl: null,
-        linkedinUrl: null,
-        otherLinks: null,
-        dk24Status: 'none',
+        ...DEFAULT_STUDENT_PROFILE_VALUES,
       })
+      .onConflictDoNothing()
       .returning()
-    dbProfile = newProfile
+
+    dbProfile =
+      newProfile ??
+      (
+        await db.select().from(studentProfiles).where(eq(studentProfiles.userId, userId)).limit(1)
+      )[0]
   }
 
   if (!dbProfile) {
@@ -116,8 +143,14 @@ export async function getStudentProfile(db: Database, userId: string) {
         studentId: userId,
         phone: null,
       })
+      .onConflictDoNothing()
       .returning()
-    dbContact = newContact
+
+    dbContact =
+      newContact ??
+      (
+        await db.select().from(contactDetails).where(eq(contactDetails.studentId, userId)).limit(1)
+      )[0]
   }
 
   if (!dbContact) {
@@ -132,37 +165,23 @@ export async function getStudentProfile(db: Database, userId: string) {
     .select()
     .from(experienceTable)
     .where(eq(experienceTable.studentId, userId))
-  let experienceRole: string | null = null
-  let experienceCompany: string | null = null
-  let experienceSummary: string | null = null
 
   const dbExperience = dbExperiences[0]
-  if (dbExperience) {
-    experienceRole = dbExperience.role || null
-    experienceCompany = dbExperience.companyName || null
-    experienceSummary = dbExperience.contributions || null
-  }
+  const experienceRole = dbExperience?.role || null
+  const experienceCompany = dbExperience?.companyName || null
+  const experienceSummary = dbExperience?.contributions || null
 
   // 5. Extract education details from otherLinks
-  let school: string | null = null
-  let degree: string | null = null
-  let gpa: string | null = null
-  let specialization: string | null = null
-  let portfolioUrl: string | null = null
-
-  if (
+  const links =
     dbProfile.otherLinks &&
     typeof dbProfile.otherLinks === 'object' &&
     !Array.isArray(dbProfile.otherLinks)
-  ) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const links = dbProfile.otherLinks as Record<string, any>
-    school = links.school || null
-    degree = links.degree || null
-    gpa = links.gpa || null
-    specialization = links.specialization || null
-    portfolioUrl = links.portfolioUrl || null
-  }
+      ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (dbProfile.otherLinks as Record<string, any>)
+      : {}
+
+  const { school = null, degree = null, specialization = null, portfolioUrl = null } = links
+  const gpa = links.gpa !== undefined && links.gpa !== null ? Number(links.gpa) : null
 
   const completionPercentage = calculateCompletionPercentage({
     fullName: dbUser.fullName,
@@ -203,25 +222,41 @@ export async function getStudentProfile(db: Database, userId: string) {
 }
 
 /**
- * Updates a student profile inside a database transaction.
+ * Updates a student profile.
+ *
+ * NOTE: neon-http driver does not support interactive transactions.
+ * These writes are NOT atomic — a failure partway through can leave
+ * studentProfiles/contactDetails/skills/experience out of sync.
+ * TODO: move to neon-serverless (Pool) or postgres-js if atomicity
+ * across these tables becomes a requirement.
  */
 export async function updateStudentProfile(
   db: Database,
   userId: string,
   body: UpdateProfilePayload,
 ) {
-  // Update using db client directly (neon-http driver does not support transactions)
-  const tx = db
+  // Validate GPA if provided (0–10 scale, decimals allowed — e.g. 8.5, 7.75)
+  if (body.gpa !== undefined && body.gpa !== null) {
+    const gpaNum = typeof body.gpa === 'string' ? Number(body.gpa) : body.gpa
+    if (typeof gpaNum !== 'number' || Number.isNaN(gpaNum)) {
+      throw new Error('Invalid GPA: must be a numeric value')
+    }
+    if (gpaNum < 0 || gpaNum > 10) {
+      throw new Error('Invalid GPA: must be between 0 and 10')
+    }
+    body.gpa = gpaNum
+  }
+
   // 1. Update user fullName
   if (body.fullName !== undefined) {
-    await tx
+    await db
       .update(users)
       .set({ fullName: body.fullName, updatedAt: new Date() })
       .where(eq(users.id, userId))
   }
 
-  // Fetch existing otherLinks to merge
-  const [existingProfileRecord] = await tx
+  // Fetch existing otherLinks to merge.
+  const [existingProfileRecord] = await db
     .select()
     .from(studentProfiles)
     .where(eq(studentProfiles.userId, userId))
@@ -258,56 +293,48 @@ export async function updateStudentProfile(
   if (body.githubUrl !== undefined) profileUpdates.githubUrl = body.githubUrl
   if (body.linkedinUrl !== undefined) profileUpdates.linkedinUrl = body.linkedinUrl
   profileUpdates.otherLinks = mergedOtherLinks
-
   profileUpdates.updatedAt = new Date()
 
   if (!existingProfileRecord) {
-    await tx.insert(studentProfiles).values({
+    await db.insert(studentProfiles).values({
       userId,
-      bio: null,
-      headline: null,
-      gradYear: null,
-      openToWork: false,
-      resumeUrl: null,
-      githubUrl: null,
-      linkedinUrl: null,
-      dk24Status: 'none',
-      ...profileUpdates,
+      ...DEFAULT_STUDENT_PROFILE_VALUES,
+      ...profileUpdates, // profileUpdates.otherLinks (mergedOtherLinks) overrides the null default
     })
   } else {
-    await tx.update(studentProfiles).set(profileUpdates).where(eq(studentProfiles.userId, userId))
+    await db.update(studentProfiles).set(profileUpdates).where(eq(studentProfiles.userId, userId))
   }
 
   // 3. Update contactDetails
   if (body.phone !== undefined) {
-    const [existingContact] = await tx
+    const [existingContact] = await db
       .select()
       .from(contactDetails)
       .where(eq(contactDetails.studentId, userId))
       .limit(1)
 
     if (!existingContact) {
-      await tx.insert(contactDetails).values({
+      await db.insert(contactDetails).values({
         studentId: userId,
         phone: body.phone || null,
       })
     } else {
-      await tx
+      await db
         .update(contactDetails)
         .set({ phone: body.phone })
         .where(eq(contactDetails.studentId, userId))
     }
   }
 
-  // 4. Update skills table
+  // 4. Update skills table (delete + reinsert)
   if (body.skills !== undefined) {
-    await tx.delete(skillsTable).where(eq(skillsTable.studentId, userId))
+    await db.delete(skillsTable).where(eq(skillsTable.studentId, userId))
     if (body.skills.length > 0) {
       const uniqueSkills = Array.from(
         new Set(body.skills.map((s) => s.trim()).filter((s) => s !== '')),
       )
       if (uniqueSkills.length > 0) {
-        await tx.insert(skillsTable).values(
+        await db.insert(skillsTable).values(
           uniqueSkills.map((s) => ({
             studentId: userId,
             skill: s,
@@ -323,7 +350,7 @@ export async function updateStudentProfile(
     body.experienceCompany !== undefined ||
     body.experienceSummary !== undefined
   ) {
-    const [existingExp] = await tx
+    const [existingExp] = await db
       .select()
       .from(experienceTable)
       .where(eq(experienceTable.studentId, userId))
@@ -335,9 +362,9 @@ export async function updateStudentProfile(
       const finalRole = body.experienceRole !== undefined ? body.experienceRole : existingExp.role
 
       if (!finalCompany || !finalRole) {
-        await tx.delete(experienceTable).where(eq(experienceTable.studentId, userId))
+        await db.delete(experienceTable).where(eq(experienceTable.studentId, userId))
       } else {
-        await tx
+        await db
           .update(experienceTable)
           .set({
             role: finalRole,
@@ -354,7 +381,7 @@ export async function updateStudentProfile(
       const finalRole = body.experienceRole || null
 
       if (finalCompany && finalRole) {
-        await tx.insert(experienceTable).values({
+        await db.insert(experienceTable).values({
           studentId: userId,
           companyName: finalCompany,
           role: finalRole,

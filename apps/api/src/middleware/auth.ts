@@ -3,7 +3,6 @@ import { env } from 'hono/adapter'
 import { createRemoteJWKSet, decodeJwt, errors, jwtVerify } from 'jose'
 import type { JWTVerifyGetKey } from 'jose'
 import { eq } from 'drizzle-orm'
-import { getDbClient, type AppEnv } from '../db.js'
 import { users } from '@repo/db'
 
 // ==========================================
@@ -194,11 +193,13 @@ export const requireAuth = createAuthMiddleware()
 // STUDENT PROFILE / ROLE AUTH
 // ==========================================
 
+export type UserRole = 'student' | 'recruiter' | 'club_admin' | 'core_admin'
+
 export interface AuthedUser {
   id: string
   fullName: string | null
   email: string
-  role: 'student' | 'recruiter' | 'admin'
+  role: UserRole
 }
 
 declare module 'hono' {
@@ -207,32 +208,29 @@ declare module 'hono' {
   }
 }
 
-const verifyAuth = createAuthMiddleware()
-
 /**
- * Hono middleware that authenticates the caller as a student.
- *  - Verifies the Neon Auth JWT.
- *  - 401 if not authenticated, or the user does not exist in the database.
- *  - 403 if the user exists but is not a student.
+ * Hono middleware that checks the caller is a student.
+ *  - Expects `requireAuth` to have already run (reads `authUser` from context).
+ *  - 401 if the user does not exist in the database.
+ *  - 403 if the user exists but does not have the `student` role.
  * On success, sets `user` on the context for downstream handlers.
+ *
+ * Usage: `router.use('*', requireAuth, requireStudentRole())`
  */
-export function requireStudentAuth() {
+export function requireStudentRole() {
   return createMiddleware<{
-    Bindings: AuthBindings & AppEnv
+    Bindings: AuthBindings & { DATABASE_URL: string }
     Variables: AuthVariables & { user: AuthedUser }
   }>(async (c, next) => {
-    let authUser: AuthUser | undefined
+    const authUser = c.get('authUser')
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const res = await verifyAuth(c as any, async () => {
-      authUser = c.get('authUser')
-    })
-
-    if (!authUser) {
-      return res
+    const db = (c as any).var?.db
+    if (!db) {
+      return c.json({ error: 'Internal Server Error', message: 'Database not available.' }, 500)
     }
-
-    const db = await getDbClient(c.env)
-    const [user] = await db.select().from(users).where(eq(users.id, authUser.id)).limit(1)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [user] = await (db as any).select().from(users).where(eq(users.id, authUser.id)).limit(1)
 
     if (!user) {
       return c.json({ error: 'Unauthorized', message: 'User record not found.' }, 401)

@@ -24,4 +24,3 @@ export type Database = ReturnType<typeof createDb>
 
 export * from './schema/index'
 export { getDb } from './db-client'
-export { seedDatabase } from './seed'

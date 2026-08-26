@@ -40,7 +40,7 @@ vi.mock('../middleware/auth.ts', () => ({
     })
     await next()
   },
-  requireStudentAuth: () => async (c: Context, next: Next) => {
+  requireStudentRole: () => async (c: Context, next: Next) => {
     const userIdHeader = c.req.header('x-user-id')
     const authHeader = c.req.header('Authorization')
 
@@ -232,7 +232,7 @@ describe('Student Profile API', () => {
         experienceSummary: 'Built cool things.',
         school: 'Stanford',
         degree: 'BS CS',
-        gpa: '3.9',
+        gpa: 3.9,
         specialization: 'AI/ML',
         portfolioUrl: 'https://teststudent.dev',
       }
