@@ -34,7 +34,7 @@ export interface UpdateProfilePayload {
   portfolioUrl?: string | null
 }
 
-type CompletionProfileFields = {
+export type CompletionProfileFields = {
   fullName?: string | null
   headline?: string | null
   bio?: string | null
