@@ -77,30 +77,22 @@ export default function LoginPage() {
     setState((s) => ({ ...s, isError: false }))
     sound.playPop(520)
 
-    try {
-      const { error } = await authClient.signIn.social({
-        provider: 'google',
-        callbackURL: '/role-select',
-      })
+    const { error } = await authClient.signIn.social({
+      provider: 'google',
+      callbackURL: '/role-select',
+    })
 
-      // On success the browser navigates to Google, so this only runs when the
-      // handshake could not be started at all.
-      if (error) {
-        failWith(error.message ?? 'Could not start Google sign-in. Please try again.')
-      }
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Could not connect to authentication service. Please check your network and try again.'
-      failWith(message)
+    // On success the browser navigates to Google, so this only runs when the
+    // handshake could not be started at all.
+    if (error) {
+      failWith(error.message ?? 'Could not start Google sign-in. Please try again.')
     }
   }
 
   return (
     <main
       id="app-root"
-      className="min-h-screen w-full flex items-center justify-center p-3 sm:p-6 md:p-8 bg-page-subtle select-none font-['Plus_Jakarta_Sans',sans-serif]"
+      className="min-h-screen w-full flex items-center justify-center p-3 sm:p-6 md:p-8 bg-[#E9EEF5] select-none font-['Plus_Jakarta_Sans',sans-serif]"
     >
       {/* Centered Interactive Login Card */}
       <div
@@ -110,7 +102,7 @@ export default function LoginPage() {
         {/* Left Pane: Characters Scene */}
         <section
           id="characters-pane"
-          className="w-full md:w-[48%] lg:w-1/2 min-h-[380px] sm:min-h-[440px] md:min-h-[560px] bg-stage flex shrink-0"
+          className="w-full md:w-[48%] lg:w-1/2 min-h-[380px] sm:min-h-[440px] md:min-h-[560px] bg-[#EEF2F6] flex shrink-0"
         >
           <CharactersScene state={state} />
         </section>

@@ -3,7 +3,7 @@ import { env } from 'hono/adapter'
 import { createRemoteJWKSet, decodeJwt, errors, jwtVerify } from 'jose'
 import type { JWTVerifyGetKey } from 'jose'
 import { eq } from 'drizzle-orm'
-import { users } from '@repo/db'
+import { users, userRoleEnum } from '@repo/db'
 
 // ==========================================
 // TYPES
@@ -193,7 +193,7 @@ export const requireAuth = createAuthMiddleware()
 // STUDENT PROFILE / ROLE AUTH
 // ==========================================
 
-export type UserRole = 'student' | 'recruiter' | 'club_admin' | 'core_admin'
+export type UserRole = (typeof userRoleEnum.enumValues)[number]
 
 export interface AuthedUser {
   id: string

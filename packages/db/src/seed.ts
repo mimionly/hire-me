@@ -17,6 +17,7 @@
 
 import 'dotenv/config'
 import * as schema from './schema/index'
+import { getDb } from './db-client'
 
 // ─────────────────────────────────────────────────────────
 // Hard-coded UUIDs so foreign-key relationships are obvious
@@ -54,7 +55,8 @@ const CM_SNEHA_ROBOT = '00000000-0030-0000-0000-000000000004'
 // ─────────────────────────────────────────────────────────
 // Seed
 // ─────────────────────────────────────────────────────────
-export async function seedDatabase(db: any) {
+async function seed() {
+  const db = await getDb()
   console.log('🌱  Seeding database...\n')
 
   // ── 1. Users ─────────────────────────────────────────
@@ -773,3 +775,8 @@ export async function seedDatabase(db: any) {
   console.log('  Verification requests:  5')
   console.log('  Notifications:          7')
 }
+
+seed().catch((err) => {
+  console.error('❌  Seed failed:', err)
+  process.exit(1)
+})

@@ -1,41 +1,15 @@
 import 'dotenv/config'
-import fs from 'fs'
-import path from 'path'
-import { fileURLToPath } from 'url'
-import { neon } from '@neondatabase/serverless'
-
-const dbUrl = process.env.DATABASE_URL
-if (!dbUrl) {
-  console.error('❌ DATABASE_URL environment variable is missing!')
-  process.exit(1)
-}
+import { migrate } from 'drizzle-orm/pglite/migrator'
+import { PGlite } from '@electric-sql/pglite'
+import { drizzle } from 'drizzle-orm/pglite'
 
 async function runLocalMigration() {
-  console.log('🛠️  Migrating Neon database...')
-  const sql = neon(dbUrl!)
+  console.log('🛠️  Migrating local PGLite database...')
+  const client = new PGlite('./.db')
+  const db = drizzle(client)
 
-  console.log('📂 Reading migrations SQL...')
-  const __dirname = path.dirname(fileURLToPath(import.meta.url))
-  const sqlPath = path.resolve(__dirname, '../migrations/0000_goofy_the_renegades.sql')
-  const sqlContent = fs.readFileSync(sqlPath, 'utf8')
-
-  const statements = sqlContent.split('--> statement-breakpoint')
-  console.log(`🚀 Executing ${statements.length} migration statements...`)
-
-  for (let i = 0; i < statements.length; i++) {
-    const statement = statements[i]?.trim()
-    if (!statement) continue
-    try {
-      await sql(statement)
-    } catch (err: any) {
-      if (err.message.includes('already exists')) {
-        console.log(`⚠️ Statement ${i} already applied (type/table exists)`)
-      } else {
-        console.error(`❌ Error in statement ${i}:`, err.message)
-        throw err
-      }
-    }
-  }
+  // Applies all SQL files from the migrations folder to our local PGLite database
+  await migrate(db, { migrationsFolder: './migrations' })
 
   console.log('✅ Local migration complete!')
   process.exit(0)
