@@ -8,5 +8,3 @@ allowBuilds:
   "sharp": true
   "unrs-resolver": true
   "workerd": false
-  - 'apps/*'
-  - 'packages/*'
